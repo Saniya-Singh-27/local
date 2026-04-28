@@ -16,3 +16,5 @@ scipy
 gunicorn
 bcrypt
 email-validator
+huggingface_hub
+python-dotenv

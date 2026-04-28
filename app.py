@@ -10,7 +10,10 @@ import models
 import schemas
 import auth
 from database import engine, get_db
-from datetime import datetime
+from datetime import datetime, timezone
+
+def get_utc_now():
+    return datetime.now(timezone.utc)
 
 # Create the database tables
 models.Base.metadata.create_all(bind=engine)
@@ -106,7 +109,7 @@ def logout(current_user: models.User = Depends(get_current_user), db: Session = 
     ).order_by(models.UserSession.login_time.desc()).first()
     
     if last_session:
-        last_session.logout_time = datetime.utcnow()
+        last_session.logout_time = get_utc_now()
         db.commit()
         return {"message": f"User {current_user.username} logged out successfully"}
     return {"message": "No active session found"}

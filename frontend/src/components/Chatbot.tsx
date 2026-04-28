@@ -13,7 +13,7 @@ interface Message {
 
 const Chatbot = () => {
   const [messages, setMessages] = useState<Message[]>([
-    { id: 1, text: "Hello! I'm your Science Assistant. Ask me anything about science topics like erosion, circuits, or rocks!", sender: 'bot' }
+    { id: 1, text: "Hi  Bestie! How Can I Help?", sender: 'bot' }
   ]);
   const [history, setHistory] = useState<any[]>([]);
   const [currentConversationId, setCurrentConversationId] = useState<number | null>(null);
@@ -297,6 +297,16 @@ const Chatbot = () => {
                     </div>
                     <div className={`rounded-2xl px-5 py-4 text-[15px] leading-relaxed shadow-sm ${msg.sender === 'user' ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white text-slate-700 rounded-tl-none border border-gray-50'}`}>
                       <div className="whitespace-pre-wrap">{msg.text}</div>
+                      
+                      {msg.sender === 'bot' && msg.data?.match_confidence !== undefined && (
+                        <div className="mt-3 flex items-center gap-2">
+                          <div className={`h-1.5 w-1.5 rounded-full ${msg.data.source === 'DeepSeek-R1' ? 'bg-purple-400' : 'bg-green-400'}`}></div>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                            {msg.data.source || 'AI'}: {(msg.data.match_confidence * 100).toFixed(1)}%
+                          </span>
+                        </div>
+                      )}
+
                       {msg.data?.type === 'mcq' && (
                         <div className="mt-4 space-y-2 border-t border-gray-50 pt-4">
                           {Object.entries(msg.data.options).map(([letter, opt]: [string, any]) => (

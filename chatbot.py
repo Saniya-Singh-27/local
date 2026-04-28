@@ -9,6 +9,11 @@ from nltk.tokenize import word_tokenize
 from sklearn.metrics.pairwise import cosine_similarity
 import sys
 import random
+import os
+from dotenv import load_dotenv
+from huggingface_hub import InferenceClient
+
+load_dotenv()
 
 # Download necessary NLTK data
 for r in ['stopwords', 'punkt', 'wordnet', 'punkt_tab']:
@@ -38,6 +43,16 @@ class SmartChatbot:
             
             self.lemmatizer = WordNetLemmatizer()
             self.stop_words = set(stopwords.words('english'))
+            
+            # Initialize Hugging Face Client for fallback
+            self.hf_token = os.getenv("HF_TOKEN")
+            if self.hf_token:
+                # Remove any quotes or spaces that might have been added
+                self.hf_token = self.hf_token.strip().strip('"').strip("'")
+            
+            self.hf_client = InferenceClient(
+                token=self.hf_token
+            ) if self.hf_token else None
             
             # MCQ patterns
             self.MCQ_PATTERNS = [
@@ -98,6 +113,90 @@ class SmartChatbot:
                 options[letter] = value
         return {'question': question_stem, 'options': options}
 
+    def get_deepseek_response(self, user_question):
+        """Fallback to DeepSeek R1 if local knowledge base fails."""
+        print(f"DEBUG: Local KB match score too low. Falling back to DeepSeek-R1 for: '{user_question}'")
+        
+        # 1. Check if token is configured
+        if not self.hf_token:
+            return ("DeepSeek AI is currently unavailable because the API token (HF_TOKEN) is missing. "
+                    "Please add your Hugging Face token to the .env file to enable AI fallback.")
+        
+        if not self.hf_client:
+            return "DeepSeek AI client failed to initialize. Please check your internet connection and API token."
+        
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                # Using chat_completion with an explicit model to satisfy the conversational task
+                # Added a system prompt to help guide the model and improve response rate
+                response = self.hf_client.chat_completion(
+                    model="deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
+                    messages=[
+                        {"role": "system", "content": "You are a helpful Science Assistant. Answer the user's question clearly and concisely."},
+                        {"role": "user", "content": user_question}
+                    ],
+                    max_tokens=500,
+                    temperature=0.7
+                )
+                
+                if response.choices and len(response.choices) > 0:
+                    content = response.choices[0].message.content
+                    if content and content.strip():
+                        return content.strip()
+                    else:
+                        print(f"DEBUG: Attempt {attempt+1} - DeepSeek returned empty content.")
+                        if attempt < max_retries - 1:
+                            import time
+                            time.sleep(1) # Wait a second before retry
+                            continue
+                        
+                        return ("The AI (DeepSeek) processed your question but didn't return any text. "
+                                "This can happen if the AI considers the topic restricted or if the model "
+                                "is currently under heavy load. Please try rephrasing your question slightly.")
+                else:
+                    print(f"DEBUG: Attempt {attempt+1} - DeepSeek returned no choices.")
+                    if attempt < max_retries - 1:
+                        import time
+                        time.sleep(1)
+                        continue
+                    return ("The AI service is currently busy and couldn't generate an answer. "
+                            "Please wait a few seconds and try asking your question again.")
+                
+            except Exception as e:
+                error_str = str(e).lower()
+                print(f"DEBUG: Attempt {attempt+1} - Error calling DeepSeek: {error_str}")
+                
+                # If it's a 503 (loading) or 429 (rate limit), we should probably not retry immediately
+                # but for other temporary network issues, we can try one more time
+                
+                # 2. Handle Token/Authorization issues
+                if "401" in error_str or "unauthorized" in error_str or "invalid token" in error_str:
+                    return ("Authentication Error: Your Hugging Face API token appears to be invalid or expired. "
+                            "Please verify the HF_TOKEN in your .env file and ensure it has 'Read' permissions.")
+                
+                # 3. Handle Rate Limits
+                elif "429" in error_str or "too many requests" in error_str or "rate limit" in error_str:
+                    return ("Rate Limit Reached: You've sent too many requests to the AI in a short period. "
+                            "Free-tier tokens have strict limits. Please wait about 60 seconds before trying again.")
+                
+                # 4. Handle Model Loading (Cold Start)
+                elif "503" in error_str or "loading" in error_str or "estimated_time" in error_str:
+                    return ("The AI model is currently 'waking up' on the server. This happens when it hasn't "
+                            "been used for a while. Please wait about 15-30 seconds and try again; it should be ready then.")
+                
+                # 5. Handle Network/Timeout
+                elif "timeout" in error_str or "connection" in error_str:
+                    if attempt < max_retries - 1:
+                        continue
+                    return ("Network Error: The request to the AI service timed out. This could be due to a "
+                            "slow internet connection or server issues at Hugging Face. Please try again.")
+                
+                # 6. Fallback for other errors
+                if attempt < max_retries - 1:
+                    continue
+                return f"AI Service Error: {str(e)}. This is likely a temporary issue with the DeepSeek provider."
+
     def get_plain_response(self, user_question):
         q_clean = self.preprocess(user_question)
         q_vec = self.retrieval_tfidf.transform([q_clean])
@@ -106,10 +205,16 @@ class SmartChatbot:
         score = sims[best_idx]
         
         if score < 0.12:
+            # TRIGGER FALLBACK HERE
+            print(f"DEBUG: Match score {score:.4f} is below threshold 0.12. Using DeepSeek.")
+            deepseek_answer = self.get_deepseek_response(user_question)
             return {
                 "type": "plain",
-                "status": "not_found",
-                "response": "I don't have enough information on that. Try asking about science topics."
+                "status": "success",
+                "match_confidence": round(float(score), 4),
+                "source": "DeepSeek-R1",
+                "fallback_reason": "Question not found in local science knowledge base (confidence too low).",
+                "response": deepseek_answer
             }
         
         matched = self.kb.iloc[best_idx]['question']
@@ -118,6 +223,7 @@ class SmartChatbot:
             "type": "plain",
             "status": "success",
             "match_confidence": round(float(score), 4),
+            "source": "Knowledge Base",
             "matched_question": matched,
             "response": answer
         }
@@ -174,6 +280,8 @@ class SmartChatbot:
         return {
             "type": "mcq",
             "status": "success",
+            "source": "Knowledge Base",
+            "match_confidence": option_scores[best_letter]['cos_sim'],
             "question": question_stem,
             "options": option_scores,
             "best_option": best_letter,
