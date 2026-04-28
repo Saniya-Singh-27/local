@@ -192,9 +192,17 @@ class QuestionRequest(BaseModel):
     conversation_id: Optional[int] = None
 
 @app.get("/")
-async def root():
+async def root(db: Session = Depends(get_db)):
+    db_status = "connected"
+    try:
+        # Simple query to test DB connection
+        db.execute("SELECT 1")
+    except Exception as e:
+        db_status = f"disconnected: {str(e)}"
+        
     return {
         "status": "online",
+        "database": db_status,
         "message": "Smart Science Chatbot API is running",
         "version": "1.2.0",
         "endpoints": ["/ask", "/signup", "/login", "/history"]
