@@ -236,7 +236,7 @@ const Chatbot = () => {
               No past conversations
             </div>
           ) : (
-            history.map((item, i) => (
+            history.map((item) => (
               <div 
                 key={item.id} 
                 onClick={() => loadConversation(item)}
