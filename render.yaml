@@ -1,15 +1,15 @@
 services:
   - type: web
-    name: smart-science-chatbot
-    env: docker
-    plan: free
+    name: smart-chatbot-api
+    env: python
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /
     envVars:
       - key: DATABASE_URL
-        fromDatabase:
-          name: chatbot_db
-          property: connectionString
-
-databases:
-  - name: chatbot_db
-    plan: free
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: HF_TOKEN
+        sync: false
