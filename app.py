@@ -16,7 +16,13 @@ def get_utc_now():
     return datetime.now(timezone.utc)
 
 # Create the database tables
-models.Base.metadata.create_all(bind=engine)
+try:
+    models.Base.metadata.create_all(bind=engine)
+    print("✅ Database tables created/verified!")
+except Exception as e:
+    print(f"❌ Database connection error: {e}")
+    # Don't exit here, let the app start so we can see the error in the logs
+    # or via an endpoint. But note that DB operations will fail.
 
 app = FastAPI(
     title="Smart Science Chatbot API",
@@ -187,7 +193,16 @@ class QuestionRequest(BaseModel):
 
 @app.get("/")
 async def root():
-    return {"message": "Welcome to the Smart Science Chatbot API. Use /ask to post a question."}
+    return {
+        "status": "online",
+        "message": "Smart Science Chatbot API is running",
+        "version": "1.2.0",
+        "endpoints": ["/ask", "/signup", "/login", "/history"]
+    }
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return status.HTTP_204_NO_CONTENT
 
 @app.post("/ask")
 async def ask_question(
